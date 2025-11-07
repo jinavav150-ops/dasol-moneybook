@@ -1,0 +1,645 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>💰 부부 공유 가계부</title>
+    
+    <!-- Firebase SDK (Firestore) -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <!-- React -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            overflow-x: hidden;
+            width: 100vw;
+        }
+        
+        #root {
+            width: 100%;
+            min-height: 100vh;
+        }
+        
+        /* 숫자 입력 필드 최적화 */
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        
+        /* 날짜 입력 필드 최적화 */
+        input[type="date"] {
+            min-width: 140px;
+        }
+        
+        /* 스크롤바 숨기기 */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect } = React;
+
+        const firebaseConfig = {
+            apiKey: "AIzaSyBiC54tZWk4qK3dRjlgEhTmWhLkLTF7JJU",
+            authDomain: "dasol-moneybook-28576.firebaseapp.com",
+            projectId: "dasol-moneybook-28576",
+            storageBucket: "dasol-moneybook-28576.firebasestorage.app",
+            messagingSenderId: "197049671466",
+            appId: "1:197049671466:web:c382db717dfa195cdac853"
+        };
+
+        if (!firebase.apps.length) {
+            firebase.initializeApp(firebaseConfig);
+        }
+        const db = firebase.firestore();
+
+        // 아이콘 컴포넌트들
+        const ChevronDown = ({ size = 24 }) => (
+            React.createElement('svg', {
+                width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+                stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round"
+            }, React.createElement('polyline', { points: "6 9 12 15 18 9" }))
+        );
+
+        const ChevronUp = ({ size = 24 }) => (
+            React.createElement('svg', {
+                width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+                stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round"
+            }, React.createElement('polyline', { points: "18 15 12 9 6 15" }))
+        );
+
+        const Plus = ({ size = 24 }) => (
+            React.createElement('svg', {
+                width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+                stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round"
+            },
+                React.createElement('line', { x1: "12", y1: "5", x2: "12", y2: "19" }),
+                React.createElement('line', { x1: "5", y1: "12", x2: "19", y2: "12" })
+            )
+        );
+
+        const Trash2 = ({ size = 20 }) => (
+            React.createElement('svg', {
+                width: size, height: size, viewBox: "0 0 24 24", fill: "none",
+                stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round"
+            },
+                React.createElement('polyline', { points: "3 6 5 6 21 6" }),
+                React.createElement('path', { d: "M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" }),
+                React.createElement('line', { x1: "10", y1: "11", x2: "10", y2: "17" }),
+                React.createElement('line', { x1: "14", y1: "11", x2: "14", y2: "17" })
+            )
+        );
+
+        function Household() {
+            const [activeMonth, setActiveMonth] = useState('25년11월');
+            const [monthData, setMonthData] = useState({});
+            const [isFixedExpanded, setIsFixedExpanded] = useState(true);
+            const [isExpenseExpanded, setIsExpenseExpanded] = useState(true);
+            const [isIncomeExpanded, setIsIncomeExpanded] = useState(true);
+            const [months, setMonths] = useState([]);
+            const [showAddMonth, setShowAddMonth] = useState(false);
+            const [newMonthYear, setNewMonthYear] = useState('25');
+            const [newMonthMonth, setNewMonthMonth] = useState('01');
+            const [editingItems, setEditingItems] = useState({});
+            const [isLoading, setIsLoading] = useState(true);
+
+            useEffect(() => {
+                const unsubscribe = db.collection('household').onSnapshot((snapshot) => {
+                    const data = {};
+                    const monthsList = [];
+                    
+                    snapshot.forEach((doc) => {
+                        const monthName = doc.id;
+                        monthsList.push(monthName);
+                        data[monthName] = doc.data();
+                    });
+
+                    if (monthsList.length === 0) {
+                        const initialMonths = ['25년11월', '25년12월', '26년01월'];
+                        const initialData = {
+                            fixed: [],
+                            expense: [],
+                            income: []
+                        };
+
+                        initialMonths.forEach(month => {
+                            db.collection('household').doc(month).set(initialData);
+                        });
+                    } else {
+                        monthsList.sort((a, b) => {
+                            const [aYear, aMonth] = a.replace('년', '-').replace('월', '').split('-');
+                            const [bYear, bMonth] = b.replace('년', '-').replace('월', '').split('-');
+                            return parseInt(aYear + aMonth) - parseInt(bYear + bMonth);
+                        });
+
+                        setMonths(monthsList);
+                        setMonthData(data);
+                        setIsLoading(false);
+                    }
+                });
+
+                return () => unsubscribe();
+            }, []);
+
+            const currentData = monthData[activeMonth] || { fixed: [], expense: [], income: [] };
+
+            const formatNumber = (num) => {
+                if (!num) return '0';
+                return parseInt(num).toLocaleString('ko-KR');
+            };
+
+            const calculateTotal = (items) => {
+                return items.reduce((sum, item) => sum + (parseInt(item.amount) || 0), 0);
+            };
+
+            const addMonth = () => {
+                const newMonth = `${newMonthYear}년${newMonthMonth}월`;
+                if (!months.includes(newMonth)) {
+                    db.collection('household').doc(newMonth).set({
+                        fixed: [],
+                        expense: [],
+                        income: []
+                    });
+                    setShowAddMonth(false);
+                }
+            };
+
+            const deleteMonth = (month) => {
+                if (window.confirm(`${month}을 삭제하시겠습니까?`)) {
+                    db.collection('household').doc(month).delete();
+                    if (activeMonth === month && months.length > 1) {
+                        setActiveMonth(months[0] === month ? months[1] : months[0]);
+                    }
+                }
+            };
+
+            const addFixed = () => {
+                const newFixed = {
+                    id: Date.now(),
+                    content: '',
+                    amount: ''
+                };
+                const updated = [...currentData.fixed, newFixed];
+                db.collection('household').doc(activeMonth).update({ fixed: updated });
+                setEditingItems({ ...editingItems, [`fixed-${newFixed.id}`]: true });
+            };
+
+            const updateFixed = (id, field, value) => {
+                const updated = currentData.fixed.map(item =>
+                    item.id === id ? { ...item, [field]: value } : item
+                );
+                db.collection('household').doc(activeMonth).update({ fixed: updated });
+            };
+
+            const deleteFixed = (id) => {
+                const updated = currentData.fixed.filter(item => item.id !== id);
+                db.collection('household').doc(activeMonth).update({ fixed: updated });
+            };
+
+            const addExpense = () => {
+                const today = new Date().toISOString().split('T')[0];
+                const newExpense = {
+                    id: Date.now(),
+                    date: today,
+                    content: '',
+                    amount: ''
+                };
+                const updated = [...currentData.expense, newExpense];
+                db.collection('household').doc(activeMonth).update({ expense: updated });
+                setEditingItems({ ...editingItems, [`expense-${newExpense.id}`]: true });
+            };
+
+            const updateExpense = (id, field, value) => {
+                const updated = currentData.expense.map(item =>
+                    item.id === id ? { ...item, [field]: value } : item
+                );
+                db.collection('household').doc(activeMonth).update({ expense: updated });
+            };
+
+            const deleteExpense = (id) => {
+                const updated = currentData.expense.filter(item => item.id !== id);
+                db.collection('household').doc(activeMonth).update({ expense: updated });
+            };
+
+            const addIncome = () => {
+                const today = new Date().toISOString().split('T')[0];
+                const newIncome = {
+                    id: Date.now(),
+                    date: today,
+                    content: '',
+                    amount: ''
+                };
+                const updated = [...currentData.income, newIncome];
+                db.collection('household').doc(activeMonth).update({ income: updated });
+                setEditingItems({ ...editingItems, [`income-${newIncome.id}`]: true });
+            };
+
+            const updateIncome = (id, field, value) => {
+                const updated = currentData.income.map(item =>
+                    item.id === id ? { ...item, [field]: value } : item
+                );
+                db.collection('household').doc(activeMonth).update({ income: updated });
+            };
+
+            const deleteIncome = (id) => {
+                const updated = currentData.income.filter(item => item.id !== id);
+                db.collection('household').doc(activeMonth).update({ income: updated });
+            };
+
+            const toggleEdit = (type, id) => {
+                const key = `${type}-${id}`;
+                setEditingItems({ ...editingItems, [key]: !editingItems[key] });
+            };
+
+            const completeEdit = (type, id) => {
+                const key = `${type}-${id}`;
+                setEditingItems({ ...editingItems, [key]: false });
+            };
+
+            const fixedTotal = calculateTotal(currentData.fixed);
+            const expenseTotal = calculateTotal(currentData.expense);
+            const incomeTotal = calculateTotal(currentData.income);
+            const balance = incomeTotal - fixedTotal - expenseTotal;
+
+            if (isLoading) {
+                return (
+                    <div className="flex items-center justify-center h-screen bg-gray-50">
+                        <div className="text-center">
+                            <div className="text-4xl mb-4">💰</div>
+                            <div className="text-xl font-bold text-gray-700">로딩 중...</div>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div className="min-h-screen bg-gray-50 pb-20">
+                    {/* 헤더 */}
+                    <div className="sticky top-0 bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg z-20">
+                        <div className="px-4 py-4">
+                            <h1 className="text-2xl font-bold text-center mb-3">💰 부부 공유 가계부</h1>
+                            
+                            {/* 월 선택 버튼 */}
+                            <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
+                                {months.map(month => (
+                                    <button
+                                        key={month}
+                                        onClick={() => setActiveMonth(month)}
+                                        className={`flex-shrink-0 px-4 py-2 rounded-lg font-bold text-sm transition-all ${
+                                            activeMonth === month
+                                                ? 'bg-white text-purple-600 shadow-lg scale-105'
+                                                : 'bg-purple-700 hover:bg-purple-800'
+                                        }`}
+                                    >
+                                        {month}
+                                    </button>
+                                ))}
+                                <button
+                                    onClick={() => setShowAddMonth(!showAddMonth)}
+                                    className="flex-shrink-0 w-10 h-10 flex items-center justify-center bg-green-500 rounded-lg hover:bg-green-600 transition-colors font-bold text-xl"
+                                >
+                                    +
+                                </button>
+                            </div>
+
+                            {/* 월 추가 폼 */}
+                            {showAddMonth && (
+                                <div className="mt-3 p-3 bg-white rounded-lg">
+                                    <div className="flex gap-2 items-center">
+                                        <input
+                                            type="number"
+                                            value={newMonthYear}
+                                            onChange={(e) => setNewMonthYear(e.target.value)}
+                                            placeholder="년"
+                                            className="w-16 px-2 py-2 border rounded text-black text-center"
+                                        />
+                                        <span className="text-black font-bold">년</span>
+                                        <input
+                                            type="number"
+                                            value={newMonthMonth}
+                                            onChange={(e) => setNewMonthMonth(e.target.value.padStart(2, '0'))}
+                                            placeholder="월"
+                                            className="w-16 px-2 py-2 border rounded text-black text-center"
+                                        />
+                                        <span className="text-black font-bold">월</span>
+                                        <button
+                                            onClick={addMonth}
+                                            className="flex-1 px-3 py-2 bg-blue-600 text-white rounded font-bold hover:bg-blue-700"
+                                        >
+                                            추가
+                                        </button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+
+                    {/* 메인 컨텐츠 */}
+                    <div className="p-3">
+                        {/* 요약 카드 */}
+                        <div className="grid grid-cols-3 gap-2 mb-3">
+                            <div className="bg-gradient-to-br from-green-400 to-green-600 rounded-xl p-3 text-white shadow-lg">
+                                <div className="text-xs font-bold mb-1">총장차액</div>
+                                <div className="text-base font-bold break-words leading-tight">{formatNumber(fixedTotal)}원</div>
+                            </div>
+                            <div className="bg-gradient-to-br from-red-400 to-red-600 rounded-xl p-3 text-white shadow-lg">
+                                <div className="text-xs font-bold mb-1">지출합계</div>
+                                <div className="text-base font-bold break-words leading-tight">{formatNumber(expenseTotal)}원</div>
+                            </div>
+                            <div className="bg-gradient-to-br from-blue-400 to-blue-600 rounded-xl p-3 text-white shadow-lg">
+                                <div className="text-xs font-bold mb-1">수입합계</div>
+                                <div className="text-base font-bold break-words leading-tight">{formatNumber(incomeTotal)}원</div>
+                            </div>
+                        </div>
+
+                        {/* 고정 지출 섹션 */}
+                        <div className="bg-white shadow-lg rounded-2xl mb-3 overflow-hidden">
+                            <button
+                                onClick={() => setIsFixedExpanded(!isFixedExpanded)}
+                                className="w-full px-4 py-3 flex items-center justify-between bg-purple-600 text-white hover:bg-purple-700 transition-colors"
+                            >
+                                <span className="text-lg font-bold">🏠 고정지출</span>
+                                {isFixedExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                            </button>
+
+                            {isFixedExpanded && (
+                                <div className="p-3">
+                                    <div className="space-y-2">
+                                        {currentData.fixed.length === 0 ? (
+                                            <div className="text-center py-8 text-gray-400 text-sm">
+                                                고정 지출 내역이 없습니다
+                                            </div>
+                                        ) : (
+                                            currentData.fixed.map(item => {
+                                                const isEditing = editingItems[`fixed-${item.id}`];
+                                                return (
+                                                    <div key={item.id} className="bg-purple-50 p-2 rounded-lg border border-purple-200">
+                                                        <div className="flex gap-2 items-center mb-2">
+                                                            <input
+                                                                type="text"
+                                                                value={item.content}
+                                                                onChange={(e) => updateFixed(item.id, 'content', e.target.value)}
+                                                                placeholder="내용"
+                                                                className="flex-1 px-2 py-2 border rounded-lg text-sm"
+                                                                disabled={!isEditing}
+                                                            />
+                                                            <button
+                                                                onClick={() => deleteFixed(item.id)}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg flex-shrink-0"
+                                                            >
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex gap-2 items-center">
+                                                            {isEditing ? (
+                                                                <input
+                                                                    type="number"
+                                                                    value={item.amount || ''}
+                                                                    onChange={(e) => updateFixed(item.id, 'amount', e.target.value)}
+                                                                    placeholder="금액"
+                                                                    className="flex-1 px-2 py-2 border rounded-lg text-sm"
+                                                                />
+                                                            ) : (
+                                                                <div className="flex-1 px-2 py-2 border rounded-lg bg-gray-100 text-sm font-bold break-words">
+                                                                    {formatNumber(item.amount)}원
+                                                                </div>
+                                                            )}
+                                                            <button
+                                                                onClick={() => isEditing ? completeEdit('fixed', item.id) : toggleEdit('fixed', item.id)}
+                                                                className={`px-4 py-2 rounded-lg font-bold text-sm flex-shrink-0 ${
+                                                                    isEditing 
+                                                                        ? 'bg-green-500 text-white hover:bg-green-600' 
+                                                                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                                                                }`}
+                                                            >
+                                                                {isEditing ? '완료' : '수정'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={addFixed}
+                                        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-3 bg-purple-600 text-white rounded-lg hover:bg-purple-700 font-bold"
+                                    >
+                                        <Plus size={20} />
+                                        고정지출 추가
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 지출 섹션 */}
+                        <div className="bg-white shadow-lg rounded-2xl mb-3 overflow-hidden">
+                            <button
+                                onClick={() => setIsExpenseExpanded(!isExpenseExpanded)}
+                                className="w-full px-4 py-3 flex items-center justify-between bg-red-600 text-white hover:bg-red-700 transition-colors"
+                            >
+                                <span className="text-lg font-bold">💸 지출</span>
+                                {isExpenseExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                            </button>
+
+                            {isExpenseExpanded && (
+                                <div className="p-3">
+                                    <div className="space-y-2">
+                                        {currentData.expense.length === 0 ? (
+                                            <div className="text-center py-8 text-gray-400 text-sm">
+                                                지출 내역이 없습니다
+                                            </div>
+                                        ) : (
+                                            currentData.expense.map(item => {
+                                                const isEditing = editingItems[`expense-${item.id}`];
+                                                return (
+                                                    <div key={item.id} className="bg-red-50 p-2 rounded-lg border border-red-200">
+                                                        <div className="flex gap-2 items-center mb-2">
+                                                            <input
+                                                                type="date"
+                                                                value={item.date}
+                                                                onChange={(e) => updateExpense(item.id, 'date', e.target.value)}
+                                                                className="px-2 py-2 border rounded-lg text-sm flex-shrink-0"
+                                                                disabled={!isEditing}
+                                                            />
+                                                            <button
+                                                                onClick={() => deleteExpense(item.id)}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg flex-shrink-0"
+                                                            >
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex gap-2 items-center mb-2">
+                                                            <input
+                                                                type="text"
+                                                                value={item.content}
+                                                                onChange={(e) => updateExpense(item.id, 'content', e.target.value)}
+                                                                placeholder="내용"
+                                                                className="flex-1 px-2 py-2 border rounded-lg text-sm"
+                                                                disabled={!isEditing}
+                                                            />
+                                                        </div>
+                                                        <div className="flex gap-2 items-center">
+                                                            {isEditing ? (
+                                                                <input
+                                                                    type="number"
+                                                                    value={item.amount || ''}
+                                                                    onChange={(e) => updateExpense(item.id, 'amount', e.target.value)}
+                                                                    placeholder="금액"
+                                                                    className="flex-1 px-2 py-2 border rounded-lg text-sm"
+                                                                />
+                                                            ) : (
+                                                                <div className="flex-1 px-2 py-2 border rounded-lg bg-gray-100 text-sm font-bold break-words">
+                                                                    {formatNumber(item.amount)}원
+                                                                </div>
+                                                            )}
+                                                            <button
+                                                                onClick={() => isEditing ? completeEdit('expense', item.id) : toggleEdit('expense', item.id)}
+                                                                className={`px-4 py-2 rounded-lg font-bold text-sm flex-shrink-0 ${
+                                                                    isEditing 
+                                                                        ? 'bg-green-500 text-white hover:bg-green-600' 
+                                                                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                                                                }`}
+                                                            >
+                                                                {isEditing ? '완료' : '수정'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={addExpense}
+                                        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700 font-bold"
+                                    >
+                                        <Plus size={20} />
+                                        지출 추가
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+
+                        {/* 수입 섹션 */}
+                        <div className="bg-white shadow-lg rounded-2xl mb-3 overflow-hidden">
+                            <button
+                                onClick={() => setIsIncomeExpanded(!isIncomeExpanded)}
+                                className="w-full px-4 py-3 flex items-center justify-between bg-blue-600 text-white hover:bg-blue-700 transition-colors"
+                            >
+                                <span className="text-lg font-bold">💵 수입</span>
+                                {isIncomeExpanded ? <ChevronUp size={20} /> : <ChevronDown size={20} />}
+                            </button>
+
+                            {isIncomeExpanded && (
+                                <div className="p-3">
+                                    <div className="space-y-2">
+                                        {currentData.income.length === 0 ? (
+                                            <div className="text-center py-8 text-gray-400 text-sm">
+                                                수입 내역이 없습니다
+                                            </div>
+                                        ) : (
+                                            currentData.income.map(item => {
+                                                const isEditing = editingItems[`income-${item.id}`];
+                                                return (
+                                                    <div key={item.id} className="bg-blue-50 p-2 rounded-lg border border-blue-200">
+                                                        <div className="flex gap-2 items-center mb-2">
+                                                            <input
+                                                                type="date"
+                                                                value={item.date}
+                                                                onChange={(e) => updateIncome(item.id, 'date', e.target.value)}
+                                                                className="px-2 py-2 border rounded-lg text-sm flex-shrink-0"
+                                                                disabled={!isEditing}
+                                                            />
+                                                            <button
+                                                                onClick={() => deleteIncome(item.id)}
+                                                                className="p-2 text-red-500 hover:bg-red-50 rounded-lg flex-shrink-0"
+                                                            >
+                                                                <Trash2 size={18} />
+                                                            </button>
+                                                        </div>
+                                                        <div className="flex gap-2 items-center mb-2">
+                                                            <input
+                                                                type="text"
+                                                                value={item.content}
+                                                                onChange={(e) => updateIncome(item.id, 'content', e.target.value)}
+                                                                placeholder="내용"
+                                                                className="flex-1 px-2 py-2 border rounded-lg text-sm"
+                                                                disabled={!isEditing}
+                                                            />
+                                                        </div>
+                                                        <div className="flex gap-2 items-center">
+                                                            {isEditing ? (
+                                                                <input
+                                                                    type="number"
+                                                                    value={item.amount || ''}
+                                                                    onChange={(e) => updateIncome(item.id, 'amount', e.target.value)}
+                                                                    placeholder="금액"
+                                                                    className="flex-1 px-2 py-2 border rounded-lg text-sm"
+                                                                />
+                                                            ) : (
+                                                                <div className="flex-1 px-2 py-2 border rounded-lg bg-gray-100 text-sm font-bold break-words">
+                                                                    {formatNumber(item.amount)}원
+                                                                </div>
+                                                            )}
+                                                            <button
+                                                                onClick={() => isEditing ? completeEdit('income', item.id) : toggleEdit('income', item.id)}
+                                                                className={`px-4 py-2 rounded-lg font-bold text-sm flex-shrink-0 ${
+                                                                    isEditing 
+                                                                        ? 'bg-green-500 text-white hover:bg-green-600' 
+                                                                        : 'bg-blue-500 text-white hover:bg-blue-600'
+                                                                }`}
+                                                            >
+                                                                {isEditing ? '완료' : '수정'}
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            })
+                                        )}
+                                    </div>
+                                    <button
+                                        onClick={addIncome}
+                                        className="mt-3 w-full flex items-center justify-center gap-2 px-4 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-bold"
+                                    >
+                                        <Plus size={20} />
+                                        수입 추가
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                </div>
+            );
+        }
+
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<Household />);
+    </script>
+</body>
+</html>
