@@ -1,0 +1,680 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>💰 부부 공유 가계부</title>
+    
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    
+    <!-- React -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            -webkit-tap-highlight-color: transparent;
+        }
+        
+        body {
+            overflow-x: hidden;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 20px 0;
+            font-family: -apple-system, BlinkMacSystemFont, 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+        }
+        
+        #root {
+            width: 100%;
+            max-width: 430px;
+            min-height: 100vh;
+            background: rgba(255, 255, 255, 0.95);
+            backdrop-filter: blur(10px);
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+            border-radius: 20px;
+            overflow: hidden;
+        }
+
+        @media (max-width: 768px) {
+            body {
+                padding: 0;
+                background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            }
+            #root {
+                max-width: 100%;
+                box-shadow: none;
+                border-radius: 0;
+                background: rgba(255, 255, 255, 0.98);
+            }
+        }
+        
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+        input[type="number"]::-webkit-outer-spin-button,
+        input[type="number"]::-webkit-inner-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        
+        input[type="date"] {
+            min-width: 110px;
+        }
+        
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
+
+        textarea {
+            resize: none;
+            overflow: hidden;
+            min-height: 38px;
+            font-family: inherit;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+        .animate-pulse {
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }
+        
+        .fade-in {
+            animation: fadeIn 0.3s ease-in;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // Firebase 설정
+        const firebaseConfig = {
+            apiKey: "AIzaSyBiC54tZWk4qK3dRjlgEhTmWhLkLTF7JJU",
+            authDomain: "dasol-moneybook-28576.firebaseapp.com",
+            projectId: "dasol-moneybook-28576",
+            storageBucket: "dasol-moneybook-28576.firebasestorage.app",
+            messagingSenderId: "197049671466",
+            appId: "1:197049671466:web:c382db717dfa195cdac853"
+        };
+
+        // Firebase 초기화
+        let db;
+        try {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            db = firebase.firestore();
+        } catch (error) {
+            console.error('Firebase 초기화 오류:', error);
+        }
+
+        // 간단한 아이콘 컴포넌트들
+        const Plus = () => '➕';
+        const Trash2 = () => '🗑️';
+        const Settings = () => '⚙️';
+        const ChevronDown = () => '▼';
+        const ChevronUp = () => '▲';
+
+        // 최적화된 입력 컴포넌트
+        function OptimizedInput({ value, onSave, placeholder, type = "text" }) {
+            const [localValue, setLocalValue] = useState(value || '');
+            const timeoutRef = useRef(null);
+
+            useEffect(() => {
+                setLocalValue(value || '');
+            }, [value]);
+
+            const handleChange = (e) => {
+                const newValue = e.target.value;
+                setLocalValue(newValue);
+                
+                // 디바운스 저장
+                if (timeoutRef.current) {
+                    clearTimeout(timeoutRef.current);
+                }
+                
+                timeoutRef.current = setTimeout(() => {
+                    onSave(newValue);
+                }, 500);
+            };
+
+            const handleBlur = (e) => {
+                if (timeoutRef.current) {
+                    clearTimeout(timeoutRef.current);
+                }
+                onSave(e.target.value);
+            };
+
+            useEffect(() => {
+                return () => {
+                    if (timeoutRef.current) {
+                        clearTimeout(timeoutRef.current);
+                    }
+                };
+            }, []);
+
+            return React.createElement('input', {
+                type: type,
+                value: localValue,
+                onChange: handleChange,
+                onBlur: handleBlur,
+                placeholder: placeholder,
+                className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+            });
+        }
+
+        function OptimizedTextarea({ value, onSave, placeholder }) {
+            const textareaRef = useRef(null);
+            const [localValue, setLocalValue] = useState(value || '');
+            const timeoutRef = useRef(null);
+
+            useEffect(() => {
+                setLocalValue(value || '');
+            }, [value]);
+
+            useEffect(() => {
+                if (textareaRef.current) {
+                    textareaRef.current.style.height = 'auto';
+                    textareaRef.current.style.height = textareaRef.current.scrollHeight + 'px';
+                }
+            }, [localValue]);
+
+            const handleChange = (e) => {
+                const newValue = e.target.value;
+                setLocalValue(newValue);
+                
+                // 디바운스 저장
+                if (timeoutRef.current) {
+                    clearTimeout(timeoutRef.current);
+                }
+                
+                timeoutRef.current = setTimeout(() => {
+                    onSave(newValue);
+                }, 500);
+            };
+
+            const handleBlur = (e) => {
+                if (timeoutRef.current) {
+                    clearTimeout(timeoutRef.current);
+                }
+                onSave(e.target.value);
+            };
+
+            useEffect(() => {
+                return () => {
+                    if (timeoutRef.current) {
+                        clearTimeout(timeoutRef.current);
+                    }
+                };
+            }, []);
+
+            return React.createElement('textarea', {
+                ref: textareaRef,
+                value: localValue,
+                onChange: handleChange,
+                onBlur: handleBlur,
+                placeholder: placeholder,
+                className: "w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white resize-none overflow-hidden min-h-[38px]",
+                rows: 1
+            });
+        }
+
+        function Household() {
+            const [activeMonth, setActiveMonth] = useState('25년11월');
+            const [monthData, setMonthData] = useState({});
+            const [isFixedExpanded, setIsFixedExpanded] = useState(true);
+            const [isExpenseExpanded, setIsExpenseExpanded] = useState(true);
+            const [isIncomeExpanded, setIsIncomeExpanded] = useState(true);
+            const [months, setMonths] = useState([]);
+            const [showMonthManage, setShowMonthManage] = useState(false);
+            const [newMonthYear, setNewMonthYear] = useState('25');
+            const [newMonthMonth, setNewMonthMonth] = useState('01');
+            const [expandedItems, setExpandedItems] = useState({});
+            const [isLoading, setIsLoading] = useState(true);
+
+            const getTodayDate = () => {
+                const today = new Date();
+                const year = today.getFullYear();
+                const month = String(today.getMonth() + 1).padStart(2, '0');
+                const day = String(today.getDate()).padStart(2, '0');
+                return `${year}-${month}-${day}`;
+            };
+
+            const formatDate = (dateString) => {
+                if (!dateString) return '';
+                const date = new Date(dateString);
+                const month = String(date.getMonth() + 1).padStart(2, '0');
+                const day = String(date.getDate()).padStart(2, '0');
+                return `${month}/${day}`;
+            };
+
+            // 데이터 로드
+            useEffect(() => {
+                let unsubscribe;
+
+                const loadData = async () => {
+                    try {
+                        unsubscribe = db.collection('household').onSnapshot(
+                            (snapshot) => {
+                                const data = {};
+                                const monthsList = [];
+                                
+                                snapshot.forEach((doc) => {
+                                    monthsList.push(doc.id);
+                                    data[doc.id] = doc.data();
+                                });
+
+                                if (monthsList.length === 0) {
+                                    // 초기 데이터 생성
+                                    const initialMonths = ['25년11월', '25년12월', '26년01월'];
+                                    const initialData = {
+                                        fixed: [],
+                                        expense: [],
+                                        income: []
+                                    };
+
+                                    const promises = initialMonths.map(month => 
+                                        db.collection('household').doc(month).set(initialData)
+                                    );
+                                    
+                                    Promise.all(promises).then(() => {
+                                        setMonths(initialMonths);
+                                        setMonthData(Object.fromEntries(initialMonths.map(m => [m, initialData])));
+                                        setIsLoading(false);
+                                    });
+                                } else {
+                                    monthsList.sort();
+                                    setMonths(monthsList);
+                                    setMonthData(data);
+                                    setIsLoading(false);
+                                }
+                            },
+                            (error) => {
+                                console.error('데이터 로드 오류:', error);
+                                setIsLoading(false);
+                            }
+                        );
+                    } catch (error) {
+                        console.error('Firestore 연결 오류:', error);
+                        setIsLoading(false);
+                    }
+                };
+
+                loadData();
+
+                return () => {
+                    if (unsubscribe) unsubscribe();
+                };
+            }, []);
+
+            const currentData = monthData[activeMonth] || { fixed: [], expense: [], income: [] };
+
+            const sortByDate = (items) => {
+                return [...items].sort((a, b) => {
+                    if (!a.date && b.date) return 1;
+                    if (a.date && !b.date) return -1;
+                    if (!a.date && !b.date) return a.id - b.id;
+                    
+                    return new Date(a.date) - new Date(b.date);
+                });
+            };
+
+            const formatNumber = (num) => {
+                if (!num && num !== 0) return '0';
+                return parseInt(num).toLocaleString('ko-KR');
+            };
+
+            const calculateTotal = (items) => {
+                return items.reduce((sum, item) => sum + (parseInt(item.amount) || 0), 0);
+            };
+
+            const saveData = async (collection, data) => {
+                try {
+                    await db.collection('household').doc(collection).set(data, { merge: true });
+                    return true;
+                } catch (error) {
+                    console.error('저장 오류:', error);
+                    return false;
+                }
+            };
+
+            const addMonth = async () => {
+                const newMonth = `${newMonthYear}년${newMonthMonth}월`;
+                if (!months.includes(newMonth)) {
+                    const newData = {
+                        fixed: [],
+                        expense: [],
+                        income: []
+                    };
+                    await saveData(newMonth, newData);
+                    setNewMonthYear('25');
+                    setNewMonthMonth('01');
+                }
+            };
+
+            const deleteMonth = async (month) => {
+                if (months.length <= 1) return;
+                if (window.confirm(`${month}을 삭제하시겠습니까?`)) {
+                    try {
+                        await db.collection('household').doc(month).delete();
+                        if (activeMonth === month) {
+                            const index = months.indexOf(month);
+                            const newActiveMonth = months[index === 0 ? 1 : index - 1];
+                            setActiveMonth(newActiveMonth);
+                        }
+                    } catch (error) {
+                        console.error('월 삭제 오류:', error);
+                    }
+                }
+            };
+
+            // 항목 추가 함수
+            const addItem = async (type) => {
+                const newItem = {
+                    id: Date.now(),
+                    date: getTodayDate(),
+                    content: '',
+                    amount: ''
+                };
+                
+                const updatedItems = [...(currentData[type] || []), newItem];
+                const updatedData = { 
+                    ...currentData, 
+                    [type]: updatedItems 
+                };
+                
+                await saveData(activeMonth, updatedData);
+                setExpandedItems(prev => ({ 
+                    ...prev, 
+                    [`${type}-${newItem.id}`]: true 
+                }));
+            };
+
+            const updateItem = async (type, id, field, value) => {
+                const updated = (currentData[type] || []).map(item =>
+                    item.id === id ? { ...item, [field]: value } : item
+                );
+                const updatedData = { ...currentData, [type]: updated };
+                await saveData(activeMonth, updatedData);
+            };
+
+            const deleteItem = async (type, id) => {
+                if (window.confirm('정말 삭제하시겠습니까?')) {
+                    const updated = (currentData[type] || []).filter(item => item.id !== id);
+                    const updatedData = { ...currentData, [type]: updated };
+                    await saveData(activeMonth, updatedData);
+                    setExpandedItems(prev => {
+                        const newState = { ...prev };
+                        delete newState[`${type}-${id}`];
+                        return newState;
+                    });
+                }
+            };
+
+            const toggleItemExpand = (type, id) => {
+                setExpandedItems(prev => ({
+                    ...prev,
+                    [`${type}-${id}`]: !prev[`${type}-${id}`]
+                }));
+            };
+
+            const fixedTotal = calculateTotal(currentData.fixed || []);
+            const expenseTotal = calculateTotal(currentData.expense || []);
+            const incomeTotal = calculateTotal(currentData.income || []);
+
+            const renderSection = (type, title, isExpanded, setIsExpanded) => {
+                const items = currentData[type] || [];
+                const sortedItems = sortByDate(items);
+                
+                const colorConfig = {
+                    fixed: { bg: 'bg-purple-100', header: 'bg-purple-200', compact: 'bg-purple-50' },
+                    expense: { bg: 'bg-pink-100', header: 'bg-pink-200', compact: 'bg-pink-50' },
+                    income: { bg: 'bg-cyan-100', header: 'bg-cyan-200', compact: 'bg-cyan-50' }
+                };
+
+                const config = colorConfig[type];
+
+                return React.createElement('div', {
+                    className: `bg-white rounded-2xl mb-4 overflow-hidden border border-gray-200`
+                }, [
+                    React.createElement('button', {
+                        key: 'header',
+                        onClick: () => setIsExpanded(!isExpanded),
+                        className: `w-full px-4 py-4 flex items-center justify-between ${config.header} text-gray-800 rounded-t-2xl`
+                    }, [
+                        React.createElement('span', { key: 'title', className: "text-lg font-bold" }, title),
+                        isExpanded ? React.createElement(ChevronUp) : React.createElement(ChevronDown)
+                    ]),
+
+                    isExpanded && React.createElement('div', { key: 'content', className: "p-4" }, [
+                        React.createElement('div', { key: 'items', className: "space-y-2" }, 
+                            sortedItems.length === 0 ? 
+                                React.createElement('div', { key: 'empty', className: "text-center py-8 text-gray-500" }, 
+                                    `${title} 내역이 없습니다`
+                                ) :
+                                sortedItems.map(item => {
+                                    const isExpanded = expandedItems[`${type}-${item.id}`];
+                                    
+                                    return React.createElement('div', { key: item.id }, [
+                                        // 컴팩트 모드
+                                        !isExpanded && React.createElement('button', {
+                                            key: 'compact',
+                                            onClick: () => toggleItemExpand(type, item.id),
+                                            className: `w-full ${config.compact} p-3 rounded-lg border text-left`
+                                        }, [
+                                            React.createElement('div', { className: "flex items-center justify-between text-sm" }, [
+                                                React.createElement('div', { className: "flex items-center gap-3 flex-1" }, [
+                                                    React.createElement('div', { className: "text-gray-600 font-medium w-12" }, 
+                                                        formatDate(item.date)
+                                                    ),
+                                                    React.createElement('div', { className: "flex-1 truncate text-gray-800" }, 
+                                                        item.content || '내용 없음'
+                                                    )
+                                                ]),
+                                                React.createElement('div', { className: "font-bold text-gray-800 ml-2" }, 
+                                                    `${formatNumber(item.amount)}원`
+                                                )
+                                            ])
+                                        ]),
+
+                                        // 확장 모드
+                                        isExpanded && React.createElement('div', {
+                                            key: 'expanded',
+                                            className: `${config.bg} p-4 rounded-xl border`
+                                        }, [
+                                            React.createElement('div', { className: "flex gap-2 items-start mb-3" }, [
+                                                React.createElement('input', {
+                                                    type: "date",
+                                                    value: item.date || '',
+                                                    onChange: (e) => updateItem(type, item.id, 'date', e.target.value),
+                                                    className: "w-32 px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white"
+                                                }),
+                                                React.createElement('button', {
+                                                    onClick: () => deleteItem(type, item.id),
+                                                    className: "p-2 text-red-500 hover:bg-red-100 rounded-lg",
+                                                    title: "삭제"
+                                                }, React.createElement(Trash2))
+                                            ]),
+
+                                            React.createElement(OptimizedTextarea, {
+                                                value: item.content || '',
+                                                onSave: (value) => updateItem(type, item.id, 'content', value),
+                                                placeholder: "내용을 입력하세요"
+                                            }),
+
+                                            React.createElement('div', { className: "flex gap-2 items-center mt-3" }, [
+                                                React.createElement(OptimizedInput, {
+                                                    type: "number",
+                                                    value: item.amount || '',
+                                                    onSave: (value) => updateItem(type, item.id, 'amount', value),
+                                                    placeholder: "금액",
+                                                    className: "flex-1"
+                                                }),
+                                                React.createElement('button', {
+                                                    onClick: () => toggleItemExpand(type, item.id),
+                                                    className: "px-4 py-2 bg-blue-500 text-white rounded-lg font-bold text-sm hover:bg-blue-600"
+                                                }, '접기')
+                                            ])
+                                        ])
+                                    ]);
+                                })
+                        ),
+
+                        // 추가 버튼
+                        React.createElement('button', {
+                            onClick: () => addItem(type),
+                            className: "mt-4 w-full flex items-center justify-center gap-2 px-4 py-3 bg-white border border-gray-300 text-gray-800 rounded-lg hover:bg-gray-50 font-bold"
+                        }, [
+                            React.createElement(Plus),
+                            `${title} 추가`
+                        ])
+                    ])
+                ]);
+            };
+
+            if (isLoading) {
+                return React.createElement('div', {
+                    className: "flex items-center justify-center h-screen bg-gray-50"
+                }, [
+                    React.createElement('div', { className: "text-center" }, [
+                        React.createElement('div', { className: "text-4xl mb-4" }, "💰"),
+                        React.createElement('div', { className: "text-xl font-bold text-gray-700" }, "로딩 중...")
+                    ])
+                ]);
+            }
+
+            return React.createElement('div', { className: "min-h-screen bg-gray-50 pb-20" }, [
+                // 헤더
+                React.createElement('div', { key: 'header', className: "sticky top-0 bg-white border-b shadow-sm z-20" }, [
+                    React.createElement('div', { className: "px-4 py-4" }, [
+                        React.createElement('div', { className: "flex items-center justify-between mb-3" }, [
+                            React.createElement('h1', { className: "text-2xl font-bold text-gray-800" }, "💰 부부 공유 가계부"),
+                            React.createElement('button', {
+                                onClick: () => setShowMonthManage(!showMonthManage),
+                                className: "p-2 bg-gray-100 rounded-lg hover:bg-gray-200",
+                                title: "월 관리"
+                            }, React.createElement(Settings))
+                        ]),
+
+                        // 월 선택기
+                        React.createElement('div', { className: "flex gap-2 overflow-x-auto pb-2 scrollbar-hide" }, 
+                            months.map(month => 
+                                React.createElement('button', {
+                                    key: month,
+                                    onClick: () => setActiveMonth(month),
+                                    className: `flex-shrink-0 px-4 py-2 rounded-lg font-bold text-sm ${
+                                        activeMonth === month ?
+                                            'bg-blue-200 text-gray-800 shadow scale-105' :
+                                            'bg-white text-gray-700 hover:bg-gray-50 border'
+                                    }`
+                                }, month)
+                            )
+                        ),
+
+                        // 월 관리 패널
+                        showMonthManage && React.createElement('div', { className: "mt-3 p-4 bg-white rounded-lg border fade-in" }, [
+                            React.createElement('h3', { className: "font-bold mb-3 text-lg" }, "월 관리"),
+                            
+                            React.createElement('div', { className: "mb-4" }, [
+                                React.createElement('label', { className: "block text-sm font-bold mb-2" }, "새 월 추가"),
+                                React.createElement('div', { className: "flex gap-2 items-center" }, [
+                                    React.createElement('input', {
+                                        type: "number",
+                                        value: newMonthYear,
+                                        onChange: (e) => setNewMonthYear(e.target.value),
+                                        className: "w-20 px-3 py-2 border rounded-lg text-center"
+                                    }),
+                                    React.createElement('span', { className: "font-bold" }, "년"),
+                                    React.createElement('input', {
+                                        type: "number",
+                                        value: newMonthMonth,
+                                        onChange: (e) => setNewMonthMonth(e.target.value.padStart(2, '0')),
+                                        className: "w-20 px-3 py-2 border rounded-lg text-center"
+                                    }),
+                                    React.createElement('span', { className: "font-bold" }, "월"),
+                                    React.createElement('button', {
+                                        onClick: addMonth,
+                                        className: "flex-1 px-4 py-2 bg-green-500 text-white rounded-lg font-bold hover:bg-green-600"
+                                    }, "추가")
+                                ])
+                            ]),
+
+                            React.createElement('div', {}, [
+                                React.createElement('label', { className: "block text-sm font-bold mb-2" }, "월 삭제"),
+                                React.createElement('div', { className: "space-y-2 max-h-40 overflow-y-auto" }, 
+                                    months.map(month => 
+                                        React.createElement('div', { key: month, className: "flex items-center justify-between p-2 bg-gray-50 rounded" }, [
+                                            React.createElement('span', { className: "font-medium" }, month),
+                                            React.createElement('button', {
+                                                onClick: () => deleteMonth(month),
+                                                className: "px-3 py-1 bg-red-500 text-white rounded text-sm hover:bg-red-600"
+                                            }, "삭제")
+                                        ])
+                                    )
+                                )
+                            ]),
+
+                            React.createElement('button', {
+                                onClick: () => setShowMonthManage(false),
+                                className: "mt-4 w-full px-4 py-2 bg-gray-500 text-white rounded-lg font-bold hover:bg-gray-600"
+                            }, "닫기")
+                        ])
+                    ])
+                ]),
+
+                // 메인 컨텐츠
+                React.createElement('div', { key: 'content', className: "p-4" }, [
+                    // 요약 카드
+                    React.createElement('div', { key: 'summary', className: "grid grid-cols-3 gap-3 mb-6" }, [
+                        React.createElement('div', { className: "bg-purple-200 rounded-xl p-3 text-gray-800 shadow border" }, [
+                            React.createElement('div', { className: "text-xs font-bold mb-1" }, "고정지출"),
+                            React.createElement('div', { className: "text-sm font-bold" }, `${formatNumber(fixedTotal)}원`)
+                        ]),
+                        React.createElement('div', { className: "bg-pink-200 rounded-xl p-3 text-gray-800 shadow border" }, [
+                            React.createElement('div', { className: "text-xs font-bold mb-1" }, "지출합계"),
+                            React.createElement('div', { className: "text-sm font-bold" }, `${formatNumber(expenseTotal)}원`)
+                        ]),
+                        React.createElement('div', { className: "bg-cyan-200 rounded-xl p-3 text-gray-800 shadow border" }, [
+                            React.createElement('div', { className: "text-xs font-bold mb-1" }, "수입합계"),
+                            React.createElement('div', { className: "text-sm font-bold" }, `${formatNumber(incomeTotal)}원`)
+                        ])
+                    ]),
+
+                    // 섹션들
+                    renderSection('fixed', '🏠 고정지출', isFixedExpanded, setIsFixedExpanded),
+                    renderSection('expense', '💸 지출', isExpenseExpanded, setIsExpenseExpanded),
+                    renderSection('income', '💵 수입', isIncomeExpanded, setIsIncomeExpanded)
+                ])
+            ]);
+        }
+
+        // 앱 실행
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(React.createElement(Household));
+    </script>
+</body>
+</html>
